@@ -15,7 +15,7 @@ interface Step { label: string; detail: string; state: StepState }
 
 const INITIAL: Step[] = [
   { label: "Ingest", detail: "Parse and validate the bank export", state: "idle" },
-  { label: "Categorize", detail: "Rules and Llama classify each line independently", state: "idle" },
+  { label: "Categorize", detail: "Rules and the AI classify each line independently", state: "idle" },
   { label: "Review", detail: "Flag items that need judgment", state: "idle" },
   { label: "Calculate", detail: "Build monthly P&Ls and reconcile to the bank", state: "idle" },
   { label: "Explain", detail: "Find material month-over-month variances", state: "idle" },
@@ -75,11 +75,11 @@ export default function Landing() {
     }
   }, [loadWorkspace]);
 
-  const useSample = async () => {
-    const res = await fetch("/sample/nyc-restaurant-transactions.xlsx");
-    const blob = await res.blob();
-    run(new File([blob], "NYC Restaurant Co. - Raw Transactions.xlsx"));
+  const loadSample = async (path: string, name: string) => {
+    const res = await fetch(path);
+    run(new File([await res.blob()], name));
   };
+  const useSample = () => loadSample("/sample/nyc-restaurant-transactions.xlsx", "NYC Restaurant Co. - Raw Transactions.xlsx");
 
   return (
     <main className="relative min-h-dvh overflow-hidden">
@@ -134,6 +134,12 @@ export default function Landing() {
                     <FileSpreadsheet className="size-4" aria-hidden /> Review the NYC Restaurant Co. sample
                   </span>
                 </StarBorder>
+                <p className="mt-4 text-center text-sm text-faint">
+                  Want to see how it handles ambiguity?{" "}
+                  <button onClick={() => loadSample("/sample/messy-bank-export.csv", "messy-bank-export.csv")} className="text-muted underline decoration-line underline-offset-4 hover:text-paper">
+                    Try a messy bank export
+                  </button>
+                </p>
                 {error && <p role="alert" className="mt-4 text-sm text-tomato">{error}</p>}
               </>
             ) : (

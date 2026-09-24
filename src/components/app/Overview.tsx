@@ -131,11 +131,11 @@ export default function Overview() {
           </h1>
           <p className="mt-2 text-muted">{ws.ledger.length} bank transactions, categorized and reconciled.</p>
         </div>
-        <div className="flex gap-8">
+        <div className="grid grid-cols-3 gap-4 sm:flex sm:gap-8">
           {pnls.map((p, i) => (
             <div key={p.month}>
-              <p className="text-sm text-muted">Operating profit, {monthLabel(p.month).split(" ")[0]}</p>
-              <p className={cx("num font-display text-3xl font-semibold", p.operatingProfit < 0 ? "text-tomato" : "text-paper")}>
+              <p className="text-xs text-muted sm:text-sm"><span className="hidden sm:inline">Operating profit, </span>{monthLabel(p.month).split(" ")[0]}<span className="sm:hidden"> profit</span></p>
+              <p className={cx("num font-display text-xl font-semibold sm:text-3xl", p.operatingProfit < 0 ? "text-tomato" : "text-paper")}>
                 <ProfitFigure value={p.operatingProfit} delay={i * 0.15} />
               </p>
             </div>
@@ -175,8 +175,8 @@ export default function Overview() {
         </div>
       </section>
 
-      <section aria-labelledby="below-h" className="grid gap-6 lg:grid-cols-[1fr_20rem]">
-        <div>
+      <section aria-labelledby="below-h" className="grid gap-6 2xl:grid-cols-[1fr_20rem]">
+        <div className="min-w-0">
           <h2 id="below-h" className="font-display text-xl font-semibold">Kept out of the P&L</h2>
           <p className="mt-1 max-w-[65ch] text-sm text-muted">
             These cash movements are real but aren&apos;t operating income or expense. They sit on the balance sheet or in equity.
@@ -200,7 +200,7 @@ export default function Overview() {
         </div>
         <div className="rounded-2xl border border-line p-4 text-sm">
           <h3 className="font-medium">Bank reconciliation</h3>
-          <dl className="mt-3 space-y-3">
+          <dl className="mt-3 grid gap-4 sm:grid-cols-3 2xl:grid-cols-1">
             {pnls.map((p) => (
               <Fragment key={p.month}>
                 <div>

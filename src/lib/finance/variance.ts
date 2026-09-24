@@ -120,6 +120,56 @@ function contextFacts(ledger: Transaction[], from: string, to: string): string[]
   return facts;
 }
 
+const weekOf = (t: Transaction) => Number(t.description.match(/\bweek\s*(\d+)/i)?.[1] ?? 0);
+
+/**
+ * Split a variance into calendar timing (extra weekly batches in one month),
+ * one-off transactions (patterns seen once in the dataset) and the remaining
+ * underlying change. Each transaction's effect is its bank amount, flipped
+ * for cost metrics, so the three parts sum exactly to the delta.
+ */
+function decompose(ledger: Transaction[], metric: string, isTotal: boolean, from: string, to: string, delta: number): Variance["decomposition"] {
+  const sections: Record<string, Section[]> = {
+    revenue: ["revenue"], cogs: ["cogs"], payroll: ["payroll"], opex: ["opex"],
+    grossProfit: ["revenue", "cogs"], operatingProfit: ["revenue", "cogs", "payroll", "opex"],
+  };
+  const inScope = (t: Transaction) =>
+    isTotal ? sections[metric].includes(categoryOf(t.classification.categoryId).section) : t.classification.categoryId === metric;
+  const sign = isCostMetric(metric) ? -1 : 1;
+  const effect = (t: Transaction) => sign * t.amount * (t.month === to ? 1 : -1);
+
+  const scoped = ledger.filter((t) => (t.month === from || t.month === to) && inScope(t));
+  const maxWeek = (m: string) => Math.max(0, ...ledger.filter((t) => t.month === m).map(weekOf));
+  const wFrom = maxWeek(from), wTo = maxWeek(to);
+  const calendarTxns = scoped.filter((t) => {
+    const w = weekOf(t);
+    return w > 0 && ((t.month === to && w > wFrom) || (t.month === from && w > wTo));
+  });
+  const counts = new Map<string, number>();
+  ledger.forEach((t) => counts.set(t.pattern, (counts.get(t.pattern) ?? 0) + 1));
+  const oneOffTxns = scoped.filter((t) => counts.get(t.pattern) === 1 && !calendarTxns.includes(t));
+
+  const calendar = sum(calendarTxns.map(effect));
+  const oneOff = sum(oneOffTxns.map(effect));
+  const excluded = new Set([...calendarTxns, ...oneOffTxns]);
+  const byCategory = new Map<string, number>();
+  scoped.filter((t) => !excluded.has(t)).forEach((t) => {
+    // For profit metrics the effect of a cost is its (negative) bank amount; effect() already handles sign.
+    byCategory.set(t.classification.categoryId, (byCategory.get(t.classification.categoryId) ?? 0) + effect(t));
+  });
+  return {
+    calendar,
+    oneOff,
+    underlying: round2(delta - calendar - oneOff),
+    calendarTxnIds: calendarTxns.map((t) => t.id),
+    oneOffTxnIds: oneOffTxns.map((t) => t.id),
+    underlyingDrivers: [...byCategory.entries()]
+      .map(([id, e]) => ({ label: categoryOf(id).name, effect: round2(e) }))
+      .filter((d) => Math.abs(d.effect) >= 0.01)
+      .sort((a, b) => Math.abs(b.effect) - Math.abs(a.effect)),
+  };
+}
+
 function isMaterial(level: Variance["level"], delta: number, p: number | null, revenueTo: number): boolean {
   const abs = Math.abs(delta);
   if (revenueTo > 0 && abs >= MATERIALITY.revenueShare * revenueTo) return true;
@@ -166,6 +216,7 @@ export function computeVariance(ledger: Transaction[], pnls: MonthlyPnl[], metri
     material: isMaterial(level, delta, p, b.revenue.total),
     drivers,
     context: contextFacts(ledger, fromMonth, toMonth),
+    decomposition: decompose(ledger, metric, isTotal, fromMonth, toMonth, delta),
   };
 }
 

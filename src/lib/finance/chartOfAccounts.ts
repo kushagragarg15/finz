@@ -44,6 +44,8 @@ export const CATEGORIES: Category[] = [
   { id: "eq_owner_distribution", name: "Owner Distributions", section: "non_pnl", treatment: "Equity distribution to the owner, not a business expense.", description: "Owner draws / distributions" },
   { id: "bs_sales_tax", name: "Sales Tax Remittance", section: "non_pnl", treatment: "Pass-through liability: sales tax collected from customers and remitted to the state.", description: "Sales tax paid to tax authority" },
   { id: "bs_deferred_revenue", name: "Gift Card Liability", section: "non_pnl", treatment: "Deferred revenue: recognise as revenue when the gift card is redeemed.", description: "Gift card sales not yet redeemed" },
+  { id: "bs_transfer", name: "Internal Transfers", section: "non_pnl", treatment: "Movement between the business's own accounts; no income or expense.", description: "Transfers to/from savings or other own accounts" },
+  { id: "bs_credit_card", name: "Credit Card Payments", section: "non_pnl", treatment: "Pays down the card liability. The underlying expenses must be booked from the card statement, not from this payment.", description: "Credit card autopay / statement payments" },
   { id: "bs_uncategorized", name: "Uncategorised (Suspense)", section: "non_pnl", treatment: "Held in suspense until a human classifies it.", description: "Could not be classified" },
 ];
 

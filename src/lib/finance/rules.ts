@@ -21,6 +21,9 @@ export const RULES: Rule[] = [
   { id: "owner", test: /owner (distribution|draw)|distribution \| owner/i, categoryId: "eq_owner_distribution", confidence: 0.97, why: "Payment to the owner labelled as a distribution." },
   { id: "salestax", test: /sales tax|dept\.? of revenue|department of taxation/i, categoryId: "bs_sales_tax", confidence: 0.95, why: "Remittance to a state tax authority." },
   { id: "giftcard", test: /gift card/i, categoryId: "bs_deferred_revenue", confidence: 0.85, sign: 1, why: "Gift card sales are a liability until redeemed." },
+  { id: "transfer", test: /transfer (to|from) (savings|checking)|internal transfer/i, categoryId: "bs_transfer", confidence: 0.9, why: "Transfer between the business's own accounts." },
+  { id: "card_payment", test: /card (autopay|payment)|card services/i, categoryId: "bs_credit_card", confidence: 0.88, sign: -1, why: "Payment of a credit card balance." },
+  { id: "supplier_credit", test: /credit memo|vendor credit|(sysco|us foods|produce|butcher|bakery).*(credit|refund)/i, categoryId: "cogs_food", confidence: 0.82, sign: 1, why: "Credit from a food supplier reduces food cost." },
   { id: "capex", test: /equipment purchase|new (oven|fridge|freezer|range)|equipment world/i, categoryId: "bs_fixed_assets", confidence: 0.9, sign: -1, why: "Purchase of long-lived kitchen equipment." },
 
   // Revenue

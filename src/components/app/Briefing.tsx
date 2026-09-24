@@ -4,13 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import ShinyText from "@/components/reactbits/ShinyText";
 import type { AnalystReply } from "@/lib/ai/analyst";
-import { askAnalyst, dataKey } from "@/lib/client";
+import { dataKey, getBriefing } from "@/lib/client";
 import { useStore } from "@/lib/store";
 import { AiMark } from "./bits";
 import { Markdown, Trace } from "./Answer";
-
-const BRIEF_Q =
-  "Write my executive briefing for the review period: how operating profit moved month to month and why (separating timing effects and one-offs from underlying trends), the single biggest cost pressure, and the top items that need my attention before these numbers are final. Maximum 6 bullets.";
 
 export default function Briefing() {
   const input = useStore((s) => s.input)!;
@@ -29,7 +26,7 @@ export default function Briefing() {
     setLoading(true);
     setError(null);
     try {
-      const r = await askAnalyst(input, [{ role: "user", content: BRIEF_Q }]);
+      const r = await getBriefing(input);
       setReply(r);
       setKey(current);
       try { sessionStorage.setItem("finz-briefing", JSON.stringify({ key: current, reply: r })); } catch {}

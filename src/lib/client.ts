@@ -14,6 +14,17 @@ export async function askAnalyst(workspace: WorkspaceInput, messages: { role: "u
   return data;
 }
 
+export async function getBriefing(workspace: WorkspaceInput): Promise<AnalystReply> {
+  const res = await fetch("/api/briefing", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Briefing request failed");
+  return data;
+}
+
 export async function explainVariance(workspace: WorkspaceInput, varianceId: string): Promise<{ text: string; source: "ai" | "template" }> {
   const res = await fetch("/api/explain", {
     method: "POST",

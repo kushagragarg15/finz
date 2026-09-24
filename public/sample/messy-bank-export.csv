@@ -1,0 +1,21 @@
+Ref,Posted Date,Memo,Payee,Amount (USD),Type
+R-001,04/01/2026,Rent,Landlord,"$(9,000.00)",ACH
+R-002,04/03/2026,Food inventory purchase - Sysco,Sysco,"$(4,210.55)",ACH/card
+R-003,04/05/2026,POS batch deposit - food sales week 1,Toast POS,"$18,402.10",Bank deposit
+R-004,04/05/2026,POS batch deposit - beverage sales week 1,Toast POS,"$5,880.35",Bank deposit
+R-005,04/07/2026,Zelle payment - M. Rodriguez,M. Rodriguez,"$(1,200.00)",Zelle
+R-006,04/08/2026,Chase card autopay,Chase Card Services,"$(3,412.87)",ACH
+R-007,04/09/2026,AMZN Mktp US*2K4,Amazon,"$(649.99)",Card
+R-008,04/10/2026,Credit memo - damaged produce,Sysco,$412.30,ACH deposit
+R-009,04/12/2026,POS batch deposit - food sales week 2,Toast POS,"$17,960.44",Bank deposit
+R-010,04/12/2026,POS batch deposit - beverage sales week 2,Toast POS,"$6,011.02",Bank deposit
+R-011,04/14/2026,IRS USATAXPYMT EFTPS,IRS,"$(2,388.10)",ACH
+R-012,04/15/2026,Payroll - hourly kitchen and FOH wages,Gusto Payroll,"$(17,904.33)",ACH
+R-013,04/16/2026,Transfer to savings x4471,Chase,"$(10,000.00)",Transfer
+R-014,04/18/2026,Square deposit,Square,"$1,150.00",Bank deposit
+R-015,04/19/2026,NYS DTF SALES TAX,NYS Dept of Taxation,"$(5,904.00)",ACH
+R-016,04/21/2026,Venmo cashout,Venmo,$860.00,Transfer
+R-017,04/22/2026,Food inventory purchase - Sysco,Sysco,"$(4,210.55)",ACH/card
+R-018,04/23/2026,Food inventory purchase - Sysco,Sysco,"$(4,210.55)",ACH/card
+R-019,04/25/2026,Con Edison,Con Edison,"$(2,140.18)",ACH
+R-020,04/28/2026,Manager salary payroll,Gusto Payroll,"$(6,500.00)",ACH

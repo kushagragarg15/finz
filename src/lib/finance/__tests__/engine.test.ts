@@ -122,3 +122,42 @@ describe("analyst tools & grounding", () => {
     expect(bad.unverified).toEqual(["$151,200.00"]);
   });
 });
+
+describe("variance decomposition", () => {
+  it("calendar + one-off + underlying sums exactly to the change", () => {
+    for (const v of ws.variances) {
+      const d = v.decomposition;
+      expect(Math.round((d.calendar + d.oneOff + d.underlying) * 100) / 100).toBe(v.delta);
+    }
+  });
+  it("isolates March's extra week and one-offs in the operating profit change", () => {
+    const d = ws.variances.find((x) => x.id === "operatingProfit:2026-02->2026-03")!.decomposition;
+    expect(d.calendar).toBe(13924.92);
+    expect(d.oneOff).toBe(-7100);
+    expect(d.oneOffTxnIds.sort()).toEqual(["T1179", "T1181"]);
+    expect(sum(d.underlyingDrivers.map((x) => x.effect))).toBeCloseTo(d.underlying, 0);
+  });
+});
+
+describe("messy CSV export", () => {
+  const messy = parseWorkbook(readFileSync("public/sample/messy-bank-export.csv"));
+  const mws = buildWorkspace({ raw: messy.transactions, ai: {}, corrections: [], resolutions: [] });
+  const byId = (id: string) => messy.transactions.find((t) => t.id === id)!;
+  it("maps alternative headers and parses US dates and $(…) amounts", () => {
+    expect(messy.transactions).toHaveLength(20);
+    expect(byId("R-001")).toMatchObject({ date: "2026-04-01", amount: -9000, description: "Rent", counterparty: "Landlord" });
+    expect(byId("R-008").amount).toBe(412.3);
+    expect(byId("R-006").amount).toBe(-3412.87);
+  });
+  it("routes supplier credits to food cost and transfers below the line", () => {
+    expect(mws.txnById.get("R-008")!.classification.categoryId).toBe("cogs_food");
+    expect(mws.txnById.get("R-013")!.classification.categoryId).toBe("bs_transfer");
+    expect(mws.txnById.get("R-006")!.classification.categoryId).toBe("bs_credit_card");
+  });
+  it("flags the duplicate Sysco charge and unknown lines", () => {
+    const kinds = mws.review.map((i) => `${i.kind}:${i.txnIds.join(",")}`);
+    expect(kinds).toContain("possible_duplicate:R-017,R-018");
+    expect(mws.txnById.get("R-005")!.classification.categoryId).toBe("bs_uncategorized"); // Zelle to a person, no AI
+    expect(mws.pnls[0].reconciles).toBe(true);
+  });
+});

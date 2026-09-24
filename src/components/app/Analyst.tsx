@@ -3,20 +3,27 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, PanelRightClose, Trash2 } from "lucide-react";
 import ShinyText from "@/components/reactbits/ShinyText";
+import { monthLabel } from "@/lib/finance/pnl";
 import { useStore } from "@/lib/store";
+import { useWorkspace } from "@/lib/useWorkspace";
 import { AiMark } from "./bits";
 import { Markdown, Trace } from "./Answer";
 
-const SUGGESTIONS = [
-  "What was our revenue in March?",
-  "How much did we spend on payroll each month?",
-  "Why did operating profit change between February and March?",
-  "What drove the increase in food costs?",
-  "Which transactions need my attention?",
-  "What changed most significantly over the review period?",
-];
+function suggestions(months: string[]): string[] {
+  const name = (m: string) => monthLabel(m, true).split(" ")[0];
+  const last = months.at(-1), prev = months.at(-2);
+  return [
+    last && `What was our revenue in ${name(last)}?`,
+    "How much did we spend on payroll each month?",
+    prev && last && `Why did operating profit change between ${name(prev)} and ${name(last)}?`,
+    "What drove the increase in food costs?",
+    "Which transactions need my attention?",
+    months.length > 1 ? "What changed most significantly over the review period?" : "What are the biggest expenses this month?",
+  ].filter((s): s is string => Boolean(s));
+}
 
 export default function Analyst() {
+  const ws = useWorkspace();
   const chat = useStore((s) => s.chat);
   const busy = useStore((s) => s.chatBusy);
   const ask = useStore((s) => s.ask);
@@ -24,6 +31,10 @@ export default function Analyst() {
   const setOpen = useStore((s) => s.setAnalystOpen);
   const setMobile = useStore((s) => s.setAnalystMobile);
   const [draft, setDraft] = useState("");
+  const [model, setModel] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/api/status").then((r) => r.json()).then((s) => setModel(s.model)).catch(() => {});
+  }, []);
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -39,7 +50,7 @@ export default function Analyst() {
   return (
     <aside aria-label="AI analyst" className="flex h-full flex-col border-l border-line bg-ink-2">
       <header className="flex items-center gap-2 border-b border-line px-4 py-3">
-        <h2 className="flex-1 font-display font-semibold">Analyst <span className="ml-1"><AiMark label="Llama on Groq" /></span></h2>
+        <h2 className="flex-1 font-display font-semibold">Analyst <span className="ml-1"><AiMark label={model ? `${model.split("/").pop()} on Groq` : "on Groq"} /></span></h2>
         {chat.length > 0 && (
           <button onClick={clearChat} className="text-faint hover:text-paper" aria-label="Clear conversation" title="Clear conversation"><Trash2 className="size-4" /></button>
         )}
@@ -53,7 +64,7 @@ export default function Analyst() {
               Ask anything about these books. Every figure comes from the ledger, and the analyst cites the transactions behind it.
             </p>
             <ul className="mt-4 space-y-2">
-              {SUGGESTIONS.map((s) => (
+              {suggestions(ws?.months ?? []).map((s) => (
                 <li key={s}>
                   <button onClick={() => send(s)} className="w-full rounded-lg border border-line px-3 py-2 text-left text-sm text-paper hover:border-iris/60 hover:bg-panel">
                     {s}

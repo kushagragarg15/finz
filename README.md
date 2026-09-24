@@ -27,7 +27,7 @@ Without a `GROQ_API_KEY` the app still works in **rules-only mode**: categorizat
 |---|---|---|
 | App | Next.js 16 (App Router) + React 19 + Tailwind v4 | One TypeScript codebase for UI and API, one-click Vercel deploy |
 | Finance engine | Pure TypeScript in `src/lib/finance` | The same code runs in the browser (instant recalculation after a correction) and on the server (recomputed for every AI request) |
-| AI | Groq, `llama-3.3-70b-versatile`, OpenAI-compatible tool calling | Fast, free tier, and strong enough for tool use. The model is swappable via `GROQ_MODEL` |
+| AI | Groq, `openai/gpt-oss-120b`, OpenAI-compatible tool calling | Fast, free tier, and reliable tool calling (Groq retired its Llama chat models). The model is swappable via `GROQ_MODEL` |
 | Parsing | SheetJS | Handles xlsx/xls/csv, Excel serial dates, currency strings |
 | State | Zustand, persisted to localStorage | Corrections and resolutions are an append-only log, replayed over the machine classification |
 | UI accents | [React Bits](https://reactbits.dev) (Aurora, BlurText, CountUp, ShinyText, StarBorder), pulled via its shadcn registry | |

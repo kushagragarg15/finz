@@ -10,7 +10,11 @@ export function templateNarrative(v: Variance): string {
   const dir = v.delta >= 0 ? "increased" : "decreased";
   const pct = v.pct === null ? "" : ` (${v.pct > 0 ? "+" : ""}${v.pct}%)`;
   const top = v.drivers.slice(0, 3).map((d) => `${d.label} ${d.effect >= 0 ? "+" : ""}${money(d.effect)}`).join("; ");
-  return `${v.metricLabel} ${dir} from ${money(v.from)} in ${monthLabel(v.fromMonth)} to ${money(v.to)} in ${monthLabel(v.toMonth)}, a change of ${money(v.delta)}${pct}. Largest drivers: ${top || "n/a"}.${v.context.length ? " " + v.context[0] : ""}`;
+  const d = v.decomposition;
+  const split = d.calendar || d.oneOff
+    ? ` Of this, ${d.calendar ? `${money(d.calendar)} is calendar timing, ` : ""}${d.oneOff ? `${money(d.oneOff)} is one-off items, ` : ""}and ${money(d.underlying)} is the underlying change.`
+    : "";
+  return `${v.metricLabel} ${dir} from ${money(v.from)} in ${monthLabel(v.fromMonth)} to ${money(v.to)} in ${monthLabel(v.toMonth)}, a change of ${money(v.delta)}${pct}.${split} Largest drivers: ${top || "n/a"}.`;
 }
 
 export async function narrateVariance(v: Variance): Promise<{ text: string; source: "ai" | "template"; grounding: GroundingResult | null }> {
@@ -24,6 +28,13 @@ export async function narrateVariance(v: Variance): Promise<{ text: string; sour
     change: v.delta,
     pct_change: v.pct,
     impact: v.impact,
+    breakdown: {
+      calendar_timing_effect: v.decomposition.calendar,
+      one_off_effect: v.decomposition.oneOff,
+      one_off_transactions: v.decomposition.oneOffTxnIds,
+      underlying_change: v.decomposition.underlying,
+      underlying_drivers: v.decomposition.underlyingDrivers.slice(0, 5),
+    },
     drivers: v.drivers.slice(0, 6).map((d) => ({
       driver: d.label, from: d.from, to: d.to, change: d.delta, effect_on_metric: d.effect, note: d.note,
       sub_drivers: d.children?.slice(0, 3).map((c) => ({ driver: c.label, change: c.delta, note: c.note, transactions: [...c.txnIdsTo, ...c.txnIdsFrom].slice(0, 4) })),
@@ -37,7 +48,7 @@ export async function narrateVariance(v: Variance): Promise<{ text: string; sour
       messages: [
         {
           role: "system",
-          content: "You are a restaurant controller explaining a P&L variance to the owner. Write 2-4 sentences. Use ONLY figures present in the JSON (copy them exactly, formatted like $12,345.67). Separate calendar/timing effects and one-offs from underlying performance. Cite key transaction ids in square brackets like [T1179]. No preamble, no headings.",
+          content: "You are a restaurant controller explaining a P&L variance to the owner. Write 2-4 sentences. Use ONLY figures present in the JSON (copy them exactly, formatted like $12,345.67). Use the breakdown (calendar timing, one-offs, underlying change; they sum exactly to the change) to separate timing and one-offs from underlying performance; omit any part that is 0. Cite key transaction ids in square brackets like [T1179]. No preamble, no headings.",
         },
         { role: "user", content: JSON.stringify(payload) },
       ],

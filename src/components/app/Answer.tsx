@@ -19,8 +19,11 @@ const TOOL_LABEL: Record<string, string> = {
 };
 
 export function Markdown({ text }: { text: string }) {
-  // Turn [T1234] citations into links we render as clickable evidence chips.
-  const linked = text.replace(/\[(T\d{3,})\]/g, "[$1](#txn-$1)").replace(/(?<![[#-])\b(T\d{4})\b(?!\])/g, "[$1](#txn-$1)");
+  // Turn transaction citations ([T1234], [T1234, T1235], bare T1234) into clickable evidence chips.
+  const linked = text
+    .replace(/\p{Cf}/gu, "")
+    .replace(/\[((?:\s*T\d{3,}\s*[,;]?)+)\]/g, (_, ids: string) => ids.match(/T\d{3,}/g)!.map((id) => `[${id}](#txn-${id})`).join(" "))
+    .replace(/(?<![[#-])\b(T\d{4})\b(?!\])/g, "[$1](#txn-$1)");
   return (
     <div className="ai-prose text-[0.95rem]">
       <ReactMarkdown

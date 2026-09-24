@@ -13,10 +13,13 @@ export const TOOL_SPECS: ToolSpec[] = [
     type: "function",
     function: {
       name: "get_pnl",
-      description: "Monthly P&L (revenue, COGS, gross profit, payroll, opex, operating profit) with category lines and non-P&L items. Use for any total or line-item question.",
+      description: "Monthly P&L totals (revenue, COGS, gross profit, payroll, opex, operating profit, margins) and excluded non-P&L items. Set include_lines for category-level lines.",
       parameters: {
         type: "object",
-        properties: { months: { type: "array", items: { type: "string" }, description: "Months like '2026-03' or 'March'. Omit for all months." } },
+        properties: {
+          months: { type: "array", items: { type: "string" }, description: "Months like '2026-03' or 'March'. Omit for all months." },
+          include_lines: { type: "boolean", description: "Include category lines within each section" },
+        },
       },
     },
   },
@@ -127,16 +130,8 @@ export function resolveMetric(input: string): string | null {
   return cat?.id ?? null;
 }
 
-const txnRow = (t: Transaction) => ({
-  id: t.id,
-  date: t.date,
-  description: t.description,
-  counterparty: t.counterparty,
-  amount: t.amount,
-  category: categoryOf(t.classification.categoryId).name,
-  section: categoryOf(t.classification.categoryId).section,
-  confidence: t.classification.confidence,
-});
+// Compact row format: [id, date, description, counterparty, amount, category]
+const txnRow = (t: Transaction) => [t.id, t.date, t.description, t.counterparty, t.amount, categoryOf(t.classification.categoryId).name];
 
 function compactVariance(v: Variance) {
   return {
@@ -149,17 +144,27 @@ function compactVariance(v: Variance) {
     pct_change: v.pct,
     impact: v.impact,
     material: v.material,
-    drivers: v.drivers.slice(0, 6).map((d) => ({
+    // Exact split of `change`; use these instead of adding drivers up yourself.
+    breakdown: {
+      calendar_timing_effect: v.decomposition.calendar,
+      calendar_transactions: v.decomposition.calendarTxnIds.slice(0, 6),
+      one_off_effect: v.decomposition.oneOff,
+      one_off_transactions: v.decomposition.oneOffTxnIds.slice(0, 6),
+      underlying_change: v.decomposition.underlying,
+      underlying_drivers: v.decomposition.underlyingDrivers.slice(0, 5),
+    },
+    favorable_drivers_total: sum(v.drivers.filter((d) => d.effect > 0).map((d) => d.effect)),
+    unfavorable_drivers_total: sum(v.drivers.filter((d) => d.effect < 0).map((d) => d.effect)),
+    drivers: v.drivers.slice(0, 5).map((d) => ({
       driver: d.label,
       from: d.from,
       to: d.to,
-      change: d.delta,
-      effect_on_metric: d.effect,
+      effect: d.effect,
       note: d.note,
-      transactions_from: d.txnIdsFrom.slice(0, 12),
-      transactions_to: d.txnIdsTo.slice(0, 12),
-      sub_drivers: d.children?.slice(0, 3).map((c) => ({ driver: c.label, change: c.delta, note: c.note, transactions_to: c.txnIdsTo.slice(0, 8), transactions_from: c.txnIdsFrom.slice(0, 8) })),
+      txns: d.children?.length ? undefined : [...d.txnIdsTo, ...d.txnIdsFrom].slice(0, 4),
+      sub: d.children?.slice(0, 2).map((c) => ({ driver: c.label, change: c.delta, note: c.note, txns: [...c.txnIdsTo, ...c.txnIdsFrom].slice(0, 4) })),
     })),
+    other_drivers_effect: sum(v.drivers.slice(5).map((d) => d.effect)),
     context: v.context,
   };
 }
@@ -176,20 +181,21 @@ export function runTool(ws: Workspace, name: string, args: Record<string, unknow
   switch (name) {
     case "get_pnl": {
       const requested = Array.isArray(args.months) ? (args.months as string[]).map((m) => resolveMonth(ws, m)).filter(Boolean) : ws.months;
+      const L = (ls: { name: string; amount: number }[]) => (args.include_lines === true ? Object.fromEntries(ls.map((l) => [l.name, l.amount])) : undefined);
       return ws.pnls
         .filter((p) => requested.includes(p.month))
         .map((p) => ({
           month: monthLabel(p.month, true),
           revenue: p.revenue.total,
-          revenue_lines: p.revenue.lines.map((l) => ({ category: l.name, amount: l.amount })),
+          revenue_lines: L(p.revenue.lines),
           cogs: p.cogs.total,
-          cogs_lines: p.cogs.lines.map((l) => ({ category: l.name, amount: l.amount })),
+          cogs_lines: L(p.cogs.lines),
           gross_profit: p.grossProfit,
           gross_margin_pct: p.grossMargin,
           payroll: p.payroll.total,
-          payroll_lines: p.payroll.lines.map((l) => ({ category: l.name, amount: l.amount })),
+          payroll_lines: L(p.payroll.lines),
           operating_expenses: p.opex.total,
-          opex_lines: p.opex.lines.map((l) => ({ category: l.name, amount: l.amount })),
+          opex_lines: L(p.opex.lines),
           operating_profit: p.operatingProfit,
           operating_margin_pct: p.operatingMargin,
           excluded_non_pnl_items: p.nonPnl.lines.map((l) => ({ category: l.name, cash_amount: l.amount, transactions: l.txnIds })),
@@ -234,8 +240,14 @@ export function runTool(ws: Workspace, name: string, args: Record<string, unknow
       if (Array.isArray(args.ids)) rows = rows.filter((t) => (args.ids as string[]).includes(t.id));
       if (typeof args.min_abs_amount === "number") rows = rows.filter((t) => Math.abs(t.amount) >= (args.min_abs_amount as number));
       if (str("sort") === "amount_desc") rows = [...rows].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-      const limit = Math.min(Number(args.limit) || 25, 40);
-      return { count: rows.length, net_total: sum(rows.map((t) => t.amount)), showing: Math.min(limit, rows.length), transactions: rows.slice(0, limit).map(txnRow) };
+      const limit = Math.min(Number(args.limit) || 20, 40);
+      return {
+        count: rows.length,
+        net_total: sum(rows.map((t) => t.amount)),
+        showing: Math.min(limit, rows.length),
+        columns: ["id", "date", "description", "counterparty", "amount", "category"],
+        rows: rows.slice(0, limit).map(txnRow),
+      };
     }
     case "get_review_items": {
       const status = str("status") ?? "open";
@@ -246,9 +258,9 @@ export function runTool(ws: Workspace, name: string, args: Record<string, unknow
           severity: i.severity,
           type: i.kind,
           title: i.title,
-          detail: i.detail,
+          detail: i.detail.length > 220 ? `${i.detail.slice(0, 220)}…` : i.detail,
           suggested_action: i.suggestedAction,
-          transactions: i.txnIds.slice(0, 10),
+          transactions: i.txnIds.slice(0, 5),
           status: i.resolution?.status ?? "open",
           reviewer_note: i.resolution?.note,
         })),
@@ -277,6 +289,41 @@ export function runTool(ws: Workspace, name: string, args: Record<string, unknow
       return CATEGORIES.map((c) => ({ id: c.id, name: c.name, section: SECTION_LABEL[c.section] }));
     default:
       return { error: `Unknown tool ${name}` };
+  }
+}
+
+/**
+ * Transactions behind the figures a tool returned. Computed deterministically
+ * and kept out of the model's context (saves tokens) but shown to the user.
+ */
+export function toolEvidence(ws: Workspace, name: string, args: Record<string, unknown>, result: unknown): string[] {
+  const str = (k: string) => (typeof args[k] === "string" ? (args[k] as string) : undefined);
+  const inMonths = (ms: (string | null)[]) => ws.ledger.filter((t) => ms.includes(t.month));
+  switch (name) {
+    case "get_pnl": {
+      const ms = Array.isArray(args.months) ? (args.months as string[]).map((m) => resolveMonth(ws, m)) : ws.months;
+      return inMonths(ms).filter((t) => categoryOf(t.classification.categoryId).section !== "non_pnl").map((t) => t.id);
+    }
+    case "get_metric_trend":
+    case "explain_variance": {
+      const metric = resolveMetric(str("metric") ?? "");
+      if (!metric) return [];
+      const ms = name === "explain_variance" ? [resolveMonth(ws, str("from_month")), resolveMonth(ws, str("to_month"))] : ws.months;
+      const sections: Record<string, string[]> = {
+        revenue: ["revenue"], cogs: ["cogs"], payroll: ["payroll"], opex: ["opex"],
+        grossProfit: ["revenue", "cogs"], operatingProfit: ["revenue", "cogs", "payroll", "opex"],
+      };
+      return inMonths(ms)
+        .filter((t) => (sections[metric] ? sections[metric].includes(categoryOf(t.classification.categoryId).section) : t.classification.categoryId === metric))
+        .map((t) => t.id);
+    }
+    case "get_top_changes":
+      // The transactions behind the top material variances' largest drivers.
+      return materialVariances(ws.variances)
+        .slice(0, Math.min(Number(args.limit) || 8, 15))
+        .flatMap((v) => (v.drivers[0] ? [...v.drivers[0].txnIdsFrom, ...v.drivers[0].txnIdsTo] : []));
+    default:
+      return [...collectTxnIds(result, new Set(ws.ledger.map((t) => t.id)))];
   }
 }
 

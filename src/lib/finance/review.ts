@@ -46,7 +46,8 @@ export function detectReviewItems(ledger: Transaction[]): ReviewItem[] {
     const cat = categoryOf(c.categoryId);
 
     // 1. Classification uncertainty (low confidence, rule/AI disagreement, unclassified)
-    if (c.source !== "user" && (c.confidence < UNCERTAIN_THRESHOLD || c.categoryId === "bs_uncategorized")) {
+    const uncertain = c.source !== "user" && (c.confidence < UNCERTAIN_THRESHOLD || c.categoryId === "bs_uncategorized");
+    if (uncertain) {
       const alt = c.alternative ? ` Alternative: ${categoryOf(c.alternative.categoryId).name} (${c.alternative.source}) — ${c.alternative.rationale}` : "";
       add({
         kind: "classification_uncertain",
@@ -58,8 +59,8 @@ export function detectReviewItems(ledger: Transaction[]): ReviewItem[] {
       });
     }
 
-    // 2. Items that need a non-P&L accounting treatment
-    if (cat.section === "non_pnl" && cat.id !== "bs_uncategorized") {
+    // 2. Items that need a non-P&L accounting treatment (once the category itself is settled)
+    if (cat.section === "non_pnl" && cat.id !== "bs_uncategorized" && !uncertain) {
       let extra = "";
       if (cat.id === "bs_loan_principal") {
         const interest = ledger.some((x) => /interest/i.test(x.description));
@@ -92,7 +93,7 @@ export function detectReviewItems(ledger: Transaction[]): ReviewItem[] {
         severity: "high",
         txnIds: [t.id],
         title: `Out-of-state counterparty: ${t.counterparty}`,
-        detail: `This business operates in ${BUSINESS_STATE}, but ${t.id} (${fmt(t.amount)}, "${t.description}") was paid to ${t.counterparty}. A NYC restaurant would normally remit sales tax to NY State (DTF).`,
+        detail: `This business operates in ${BUSINESS_STATE}, but ${t.id} (${fmt(t.amount)}, "${t.description}") was paid to ${t.counterparty}.${cat.id === "bs_sales_tax" ? " A NYC restaurant would normally remit sales tax to NY State (DTF)." : ""}`,
         suggestedAction: "Verify the payee; it may be a misdirected payment or a data-entry error.",
       });
     }
@@ -140,7 +141,9 @@ export function detectReviewItems(ledger: Transaction[]): ReviewItem[] {
       txnIds: [t.id],
       title: `One-off ${cat.name}: ${t.description}`,
       detail: `${fmt(t.amount)} to ${t.counterparty} on ${t.date} does not recur in the period and distorts month-over-month comparisons.`,
-      suggestedAction: "Confirm the category and consider matching it to the related revenue (e.g. the catering invoice).",
+      suggestedAction: /catering|event/i.test(t.description)
+        ? "Confirm the category and match it to the related catering revenue when judging margins."
+        : "Confirm the category and whether it should be spread over the periods it benefits.",
     });
   }
 

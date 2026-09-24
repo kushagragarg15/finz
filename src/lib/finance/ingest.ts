@@ -44,13 +44,17 @@ function toIsoDate(v: unknown): string | null {
 function toAmount(v: unknown): number | null {
   if (typeof v === "number" && isFinite(v)) return Math.round(v * 100) / 100;
   if (v == null) return null;
-  let s = String(v).trim();
+  // Accepts "$1,234.56", "-$1,234.56", "$(1,234.56)", "(1,234.56)", "1,234.56-", "1,234.56 DR".
+  let s = String(v).trim().replace(/[$€£\s]/g, "").replace(/,/g, "");
   if (!s) return null;
-  const negParen = /^\(.*\)$/.test(s);
-  s = s.replace(/[()$,\s]/g, "");
+  let negative = false;
+  if (/^\(.*\)$/.test(s)) { negative = true; s = s.slice(1, -1); }
+  if (/-$/.test(s)) { negative = true; s = s.slice(0, -1); }
+  if (/DR$/i.test(s)) { negative = true; s = s.slice(0, -2); }
+  else if (/CR$/i.test(s)) s = s.slice(0, -2);
   const n = Number(s);
-  if (!isFinite(n)) return null;
-  return Math.round((negParen ? -Math.abs(n) : n) * 100) / 100;
+  if (s === "" || !isFinite(n)) return null;
+  return Math.round((negative ? -Math.abs(n) : n) * 100) / 100;
 }
 
 /** Parse an .xlsx / .xls / .csv buffer into validated raw transactions. */

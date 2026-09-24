@@ -147,4 +147,14 @@ export interface Variance {
   material: boolean;
   drivers: VarianceDriver[];
   context: string[]; // deterministic facts, e.g. partial weeks
+  /** delta = calendar + oneOff + underlying (exact, in the metric's own sign). */
+  decomposition: {
+    calendar: number;
+    oneOff: number;
+    underlying: number;
+    calendarTxnIds: string[];
+    oneOffTxnIds: string[];
+    /** Category effects after removing calendar and one-off transactions, largest first (sums to underlying). */
+    underlyingDrivers: { label: string; effect: number }[];
+  };
 }

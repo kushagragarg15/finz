@@ -1,13 +1,15 @@
 import { monthLabel } from "../finance/pnl";
 import type { Workspace } from "../finance/workspace";
 import { checkGrounding, type GroundingResult } from "./grounding";
-import { groqChat, type ChatMessage } from "./groq";
-import { TOOL_SPECS, collectTxnIds, runTool } from "./tools";
+import { groqChat, type ChatMessage, type ToolCall } from "./groq";
+import { TOOL_SPECS, collectTxnIds, runTool, toolEvidence } from "./tools";
 
 export interface ToolTrace {
   name: string;
   args: Record<string, unknown>;
   result: unknown;
+  /** Transactions behind the figures this call returned (never sent to the model). */
+  evidence: string[];
 }
 
 export interface AnalystReply {
@@ -16,6 +18,8 @@ export interface AnalystReply {
   evidenceTxnIds: string[];
   grounding: GroundingResult;
   varianceIds: string[];
+  model: string;
+  tokens: number;
 }
 
 function systemPrompt(ws: Workspace): string {
@@ -25,10 +29,12 @@ Data: ${ws.ledger.length} bank transactions, ${ws.months.map((m) => monthLabel(m
 HARD RULES
 1. Every number you state MUST come verbatim from a tool result. Never estimate, never do mental arithmetic — use the calculate tool for any sum or difference not already provided.
 2. Always call tools before answering a financial question, even if you think you know the answer.
-3. Cite supporting transactions inline using their ids in square brackets, e.g. [T1179]. Cite the most important 1-6 ids, not all.
+3. Cite the most important 1-6 supporting transactions inline by id in square brackets, e.g. [T1179]. Square brackets are ONLY for transaction ids — never write [January 2026] or [P&L]. Totals need no citation; the app attaches the underlying transactions automatically.
 4. If the data cannot answer the question, say so plainly. Do not speculate about data you don't have.
 5. Distinguish P&L items from non-P&L items (capex, loan principal, owner distributions, sales tax, gift cards).
-6. When explaining a change, separate calendar/timing effects and one-offs (see "context" in explain_variance) from underlying trading performance.
+6. When explaining a change, use explain_variance and quote its "breakdown": calendar_timing_effect, one_off_effect and underlying_change are exact and sum to the change. Never add up drivers yourself.
+7. Call independent tools in parallel in one step when you can, and never repeat an identical call.
+8. When asked to show transactions, fetch them once and summarise the key ones; the app renders the full evidence list, so never paste raw JSON or tool calls.
 
 STYLE
 - Lead with the direct answer in one sentence, then 2-5 concise bullets. Use markdown. Format money like $12,345.67.
@@ -37,29 +43,55 @@ STYLE
 
 const MAX_STEPS = 6;
 
-export async function runAnalyst(ws: Workspace, history: { role: "user" | "assistant"; content: string }[]): Promise<AnalystReply> {
-  const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(ws) }, ...history.slice(-8)];
-  const trace: ToolTrace[] = [];
+/** Some models emit their own citation markers (e.g. 【tool:0】); strip them. */
+const clean = (s: string) => s.replace(/【[^】]*】/g, "").replace(/\p{Cf}/gu, "").trim();
+const MAX_TOOL_CHARS = 5000;
 
-  let answer = "";
-  for (let step = 0; step < MAX_STEPS; step++) {
-    const msg = await groqChat({ messages, tools: TOOL_SPECS, maxTokens: 1500 });
-    if (msg.tool_calls?.length) {
-      messages.push({ role: "assistant", content: msg.content ?? null, tool_calls: msg.tool_calls });
-      for (const call of msg.tool_calls) {
-        let args: Record<string, unknown> = {};
-        try { args = JSON.parse(call.function.arguments || "{}"); } catch { /* keep empty */ }
-        let result: unknown;
-        try { result = runTool(ws, call.function.name, args); } catch (e) { result = { error: (e as Error).message }; }
-        trace.push({ name: call.function.name, args, result });
-        messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result).slice(0, 12000) });
-      }
+function execTools(ws: Workspace, calls: ToolCall[], trace: ToolTrace[], messages: ChatMessage[]) {
+  for (const call of calls) {
+    let args: Record<string, unknown> = {};
+    try { args = JSON.parse(call.function.arguments || "{}"); } catch { /* keep empty */ }
+    const seen = trace.find((t) => t.name === call.function.name && JSON.stringify(t.args) === JSON.stringify(args));
+    if (seen) {
+      messages.push({ role: "tool", tool_call_id: call.id, content: '{"note":"Identical call already made earlier in this conversation turn; reuse that result."}' });
       continue;
     }
-    answer = msg.content ?? "";
-    break;
+    let result: unknown;
+    try { result = runTool(ws, call.function.name, args); } catch (e) { result = { error: (e as Error).message }; }
+    trace.push({ name: call.function.name, args, result, evidence: toolEvidence(ws, call.function.name, args, result) });
+    let content = JSON.stringify(result);
+    // Free-tier token budgets are tight; oversized results are cut and the model is told to narrow the query.
+    if (content.length > MAX_TOOL_CHARS) content = `${content.slice(0, MAX_TOOL_CHARS)} ...[truncated: narrow the query]`;
+    messages.push({ role: "tool", tool_call_id: call.id, content });
   }
-  if (!answer) answer = "I couldn't complete that analysis within the tool-call budget. Try a narrower question.";
+}
+
+/** Tool-calling loop. Returns the final text answer (or "" if the step budget ran out). */
+async function loop(ws: Workspace, messages: ChatMessage[], trace: ToolTrace[], steps: number): Promise<{ text: string; model: string; tokens: number }> {
+  let model = "";
+  let tokens = 0;
+  for (let step = 0; step < steps; step++) {
+    const msg = await groqChat({ messages, tools: TOOL_SPECS, maxTokens: 1500 });
+    model = msg.model;
+    tokens += msg.tokens;
+    if (msg.tool_calls?.length) {
+      messages.push({ role: "assistant", content: msg.content ?? null, tool_calls: msg.tool_calls });
+      execTools(ws, msg.tool_calls, trace, messages);
+      continue;
+    }
+    return { text: msg.content ?? "", model, tokens };
+  }
+  return { text: "", model, tokens };
+}
+
+export async function runAnalyst(ws: Workspace, history: { role: "user" | "assistant"; content: string }[]): Promise<AnalystReply> {
+  const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(ws) }, ...history.slice(-6)];
+  const trace: ToolTrace[] = [];
+
+  const first = await loop(ws, messages, trace, MAX_STEPS);
+  let answer = clean(first.text) || "I couldn't complete that analysis within the tool-call budget. Try a narrower question.";
+  let model = first.model;
+  let tokens = first.tokens;
 
   // Grounding: every figure must trace back to a deterministic tool output.
   let grounding = checkGrounding(answer, trace.map((t) => t.result));
@@ -69,31 +101,22 @@ export async function runAnalyst(ws: Workspace, history: { role: "user" | "assis
       role: "user",
       content: `VERIFICATION FAILED: these figures do not appear in any tool result: ${grounding.unverified.join(", ")}. Rewrite the answer using only figures that appear in tool results (use the calculate tool if you need arithmetic). Do not mention this verification step.`,
     });
-    for (let step = 0; step < 3; step++) {
-      const retry = await groqChat({ messages, tools: TOOL_SPECS, maxTokens: 1500 });
-      if (retry.tool_calls?.length) {
-        messages.push({ role: "assistant", content: retry.content ?? null, tool_calls: retry.tool_calls });
-        for (const call of retry.tool_calls) {
-          let args: Record<string, unknown> = {};
-          try { args = JSON.parse(call.function.arguments || "{}"); } catch { /* ignore */ }
-          let result: unknown;
-          try { result = runTool(ws, call.function.name, args); } catch (e) { result = { error: (e as Error).message }; }
-          trace.push({ name: call.function.name, args, result });
-          messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result).slice(0, 12000) });
-        }
-        continue;
+    // Best effort: if the rewrite fails (e.g. rate limit) we keep the answer and show which figures are unverified.
+    const retry = await loop(ws, messages, trace, 3).catch(() => null);
+    if (retry) tokens += retry.tokens;
+    if (retry?.text) {
+      const g2 = checkGrounding(retry.text, trace.map((t) => t.result));
+      if (g2.unverified.length <= grounding.unverified.length) {
+        answer = clean(retry.text);
+        grounding = g2;
+        model = retry.model;
       }
-      if (retry.content) {
-        const g2 = checkGrounding(retry.content, trace.map((t) => t.result));
-        if (g2.unverified.length <= grounding.unverified.length) { answer = retry.content; grounding = g2; }
-      }
-      break;
     }
   }
 
   const known = new Set(ws.ledger.map((t) => t.id));
   const cited = [...collectTxnIds(answer, known)];
-  const fromTools = [...collectTxnIds(trace.map((t) => t.result), known)];
+  const fromTools = trace.flatMap((t) => t.evidence);
   const varianceIds = trace
     .map((t) => (t.result as { variance_id?: string })?.variance_id)
     .filter((v): v is string => Boolean(v));
@@ -101,8 +124,11 @@ export async function runAnalyst(ws: Workspace, history: { role: "user" | "assis
   return {
     answer,
     trace,
-    evidenceTxnIds: cited.length ? cited : fromTools.slice(0, 30),
+    // Cited transactions first, then everything behind the figures the tools returned.
+    evidenceTxnIds: [...new Set([...cited, ...fromTools])],
     grounding,
     varianceIds,
+    model,
+    tokens,
   };
 }
