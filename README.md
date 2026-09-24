@@ -94,7 +94,7 @@ Everything that produces a number or an accounting decision that must be auditab
 
 - `npm test` runs 20 tests against the real dataset:
   - ingestion and the bank total to the cent;
-  - March P&L figures checked against an independent pandas calculation;
+  - March P&L figures checked against an independent Python (openpyxl) calculation;
   - monthly reconciliation;
   - treatment of every judgment item;
   - drivers summing exactly to their variance;
