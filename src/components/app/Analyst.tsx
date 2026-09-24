@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, PanelRightClose, Trash2 } from "lucide-react";
+import { ArrowUp, Trash2, X } from "lucide-react";
 import ShinyText from "@/components/reactbits/ShinyText";
 import { monthLabel } from "@/lib/finance/pnl";
 import { useStore } from "@/lib/store";
 import { useWorkspace } from "@/lib/useWorkspace";
-import { AiMark } from "./bits";
 import { Markdown, Trace } from "./Answer";
 
 function suggestions(months: string[]): string[] {
@@ -31,10 +30,6 @@ export default function Analyst() {
   const setOpen = useStore((s) => s.setAnalystOpen);
   const setMobile = useStore((s) => s.setAnalystMobile);
   const [draft, setDraft] = useState("");
-  const [model, setModel] = useState<string | null>(null);
-  useEffect(() => {
-    fetch("/api/status").then((r) => r.json()).then((s) => setModel(s.model)).catch(() => {});
-  }, []);
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -47,26 +42,36 @@ export default function Analyst() {
     ask(q);
   };
 
+  const close = () => {
+    setMobile(false);
+    if (window.matchMedia("(min-width: 1024px)").matches) setOpen(false);
+  };
+
   return (
-    <aside aria-label="AI analyst" className="flex h-full flex-col border-l border-line bg-ink-2">
-      <header className="flex items-center gap-2 border-b border-line px-4 py-3">
-        <h2 className="flex-1 font-display font-semibold">Analyst <span className="ml-1"><AiMark label={model ? `${model.split("/").pop()} on Groq` : "on Groq"} /></span></h2>
+    <aside aria-label="Analyst" className="flex h-full flex-col border-l border-rule bg-sheet">
+      <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-rule px-4 py-2">
+        <div className="flex-1">
+          <h2 className="font-cond text-base font-semibold leading-tight">Ask about these books</h2>
+          <p className="text-xs text-ink-3">Figures come from the ledger, with their transactions.</p>
+        </div>
         {chat.length > 0 && (
-          <button onClick={clearChat} className="text-faint hover:text-paper" aria-label="Clear conversation" title="Clear conversation"><Trash2 className="size-4" /></button>
+          <button onClick={clearChat} className="grid size-9 place-items-center rounded-md text-ink-3 hover:bg-sheet-2 hover:text-ink" aria-label="Clear conversation" title="Clear conversation">
+            <Trash2 className="size-4" />
+          </button>
         )}
-        <button onClick={() => { setOpen(false); setMobile(false); }} className="text-faint hover:text-paper" aria-label="Hide analyst"><PanelRightClose className="size-4" /></button>
+        <button onClick={close} className="grid size-9 place-items-center rounded-md text-ink-3 hover:bg-sheet-2 hover:text-ink" aria-label="Close analyst">
+          <X className="size-5" />
+        </button>
       </header>
 
       <div ref={scroller} className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {chat.length === 0 && (
           <div>
-            <p className="text-sm text-muted">
-              Ask anything about these books. Every figure comes from the ledger, and the analyst cites the transactions behind it.
-            </p>
-            <ul className="mt-4 space-y-2">
+            <p className="text-sm text-ink-2">Try one of these, or ask your own.<span className="hidden lg:inline"> Press <kbd className="rounded border border-rule-strong px-1 text-xs">/</kbd> from anywhere to jump here.</span></p>
+            <ul className="mt-2 divide-y divide-rule border-y border-rule">
               {suggestions(ws?.months ?? []).map((s) => (
                 <li key={s}>
-                  <button onClick={() => send(s)} className="w-full rounded-lg border border-line px-3 py-2 text-left text-sm text-paper hover:border-iris/60 hover:bg-panel">
+                  <button onClick={() => send(s)} className="w-full py-2.5 text-left text-sm text-ink hover:text-ai">
                     {s}
                   </button>
                 </li>
@@ -76,20 +81,20 @@ export default function Analyst() {
         )}
         {chat.map((t) =>
           t.role === "user" ? (
-            <div key={t.id} className="ml-8 rounded-xl bg-panel-2 px-3 py-2 text-sm">{t.content}</div>
+            <p key={t.id} className="ml-8 rounded-md bg-sheet-2 px-3 py-2 text-sm">{t.content}</p>
           ) : (
-            <div key={t.id} className="border-l-2 border-iris/50 pl-3">
-              {t.error ? <p className="text-sm text-amber">{t.content}</p> : <Markdown text={t.content} />}
+            <div key={t.id} className="border-l-2 border-ai pl-3">
+              {t.error ? <p className="text-sm text-flag">{t.content}</p> : <Markdown text={t.content} />}
               {t.reply && <Trace reply={t.reply} />}
             </div>
           ),
         )}
-        {busy && <ShinyText text="Querying the ledger…" color="#8b80d6" shineColor="#ede9e0" speed={1.8} className="text-sm" />}
+        {busy && <ShinyText text="Looking it up in the ledger…" color="#6d86e6" shineColor="#1b2233" speed={1.8} className="text-sm" />}
       </div>
 
-      <form onSubmit={(e) => { e.preventDefault(); send(draft); }} className="border-t border-line p-3">
-        <div className="flex items-end gap-2 rounded-xl border border-line bg-panel px-3 py-2 focus-within:border-iris">
-          <label htmlFor="ask" className="sr-only">Ask the analyst</label>
+      <form onSubmit={(e) => { e.preventDefault(); send(draft); }} className="pb-safe shrink-0 border-t border-rule p-3">
+        <div className="flex items-end gap-2 rounded-md border border-rule-strong bg-sheet px-3 py-2 focus-within:border-ai">
+          <label htmlFor="ask" className="sr-only">Ask a question about these books</label>
           <textarea
             id="ask"
             rows={1}
@@ -97,9 +102,9 @@ export default function Analyst() {
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft); } }}
             placeholder="Why did food costs rise in March?"
-            className="max-h-32 flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-faint"
+            className="max-h-32 min-h-7 flex-1 resize-none bg-transparent py-1 text-[16px] outline-none placeholder:text-ink-3 sm:text-sm"
           />
-          <button disabled={!draft.trim() || busy} className="grid size-7 place-items-center rounded-lg bg-iris text-ink disabled:opacity-30" aria-label="Send">
+          <button disabled={!draft.trim() || busy} className="grid size-9 shrink-0 place-items-center rounded-md bg-ink text-white disabled:opacity-25" aria-label="Ask">
             <ArrowUp className="size-4" />
           </button>
         </div>

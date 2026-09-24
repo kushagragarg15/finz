@@ -161,3 +161,14 @@ describe("messy CSV export", () => {
     expect(mws.pnls[0].reconciles).toBe(true);
   });
 });
+
+describe("variance context is scoped to the metric", () => {
+  it("does not mention cost one-offs when explaining revenue", () => {
+    const rev = ws.variances.find((x) => x.id === "revenue:2026-02->2026-03")!;
+    expect(rev.context.join(" ")).not.toMatch(/T1179/);
+    expect(rev.context.join(" ")).toMatch(/weekly POS deposit/);
+    const food = ws.variances.find((x) => x.id === "cogs_food:2026-02->2026-03")!;
+    expect(food.context.join(" ")).toMatch(/T1179/);
+    expect(food.context.join(" ")).not.toMatch(/weekly POS deposit/);
+  });
+});

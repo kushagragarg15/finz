@@ -11,6 +11,6 @@ export default function Home() {
   const input = useStore((s) => s.input);
   // The workspace lives in localStorage; wait for hydration to avoid a flash of the landing page.
   const hydrated = useSyncExternalStore(subscribe, () => useStore.persist.hasHydrated(), () => false);
-  if (!hydrated) return <div className="min-h-dvh bg-ink" />;
+  if (!hydrated) return <div className="min-h-dvh bg-desk" />;
   return input ? <Shell /> : <Landing />;
 }

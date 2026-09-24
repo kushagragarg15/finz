@@ -4,7 +4,25 @@ An AI-native financial review app. Upload a bank export and it categorizes every
 
 Built for the Finz SWE internship challenge using the *NYC Restaurant Co.* dataset (181 transactions, Jan–Mar 2026).
 
-**Live app:** _add Vercel URL_ · **Walkthrough:** _add video link_
+[![CI](https://github.com/kushagragarg15/finz/actions/workflows/ci.yml/badge.svg)](https://github.com/kushagragarg15/finz/actions/workflows/ci.yml)
+
+**Live app:** _add Vercel URL_. **Walkthrough:** _add video link_.
+
+| Statement with audit tickmarks | Variance bridge with AI note |
+|---|---|
+| ![Monthly statement](docs/statement.png) | ![Operating profit bridge](docs/bridge.png) |
+
+| Landing | Phone |
+|---|---|
+| ![Landing](docs/landing.png) | <img src="docs/mobile.png" alt="Phone layout" width="260"> |
+
+### What's here beyond the brief
+- **Every P&L figure carries audit tickmarks**, computed from the ledger: agreed to bank, footed, flagged by an open review item, adjusted by a reviewer.
+- **Variance bridges.** Each change is split exactly into calendar timing, one-offs and the underlying change. For example, March's +$12,844 operating profit is only +$6,019 underlying.
+- **Answers are checked against the ledger.** Any figure the model states that the engine didn't compute is flagged, and the model is asked to rewrite.
+- **A live evaluation harness** (`npm run eval`) that scores the analyst on the brief's questions and on adversarial prompts. See [evals/RESULTS.md](evals/RESULTS.md).
+- **Workpaper export to .xlsx**: P&L with tie-out, the categorized ledger, variance decomposition, the review log and the correction audit trail.
+- **Shareable links** to any view or variance (e.g. `/#variances/operatingProfit:2026-02->2026-03`), plus a responsive layout down to 375px and CI on every push.
 
 ---
 
@@ -14,10 +32,11 @@ Built for the Finz SWE internship challenge using the *NYC Restaurant Co.* datas
 npm install
 cp .env.example .env.local        # add GROQ_API_KEY (free at console.groq.com)
 npm run dev                       # http://localhost:3000
-npm test                          # 25 engine + grounding tests
+npm test                          # 26 engine + grounding tests
+npm run eval                      # live analyst evaluation (uses the Groq key, ~3 min)
 ```
 
-Click **Review the NYC Restaurant Co. sample**, or drop in any `.xlsx`/`.csv` with date, description and amount columns.
+Click **Review the sample books**, or drop in any `.xlsx`/`.csv` with date, description and amount columns.
 
 **Try a messy bank export** loads `public/sample/messy-bank-export.csv`. It exercises the rest of the pipeline:
 - different column headers, US dates and `$(1,234.56)` amounts;
@@ -36,7 +55,7 @@ Without a `GROQ_API_KEY` the app still works in **rules-only mode**: categorizat
 | AI | Groq, `openai/gpt-oss-120b`, OpenAI-compatible tool calling | Fast, free tier, and reliable tool calling (Groq retired its Llama chat models). The model is swappable via `GROQ_MODEL` |
 | Parsing | SheetJS | Handles xlsx/xls/csv, Excel serial dates, currency strings |
 | State | Zustand, persisted to localStorage | Corrections and resolutions are an append-only log, replayed over the machine classification |
-| UI accents | [React Bits](https://reactbits.dev) (Aurora, BlurText, CountUp, ShinyText, StarBorder), pulled via its shadcn registry | |
+| UI | Tailwind v4 tokens, IBM Plex Sans and Plex Sans Condensed, Lucide icons, [React Bits](https://reactbits.dev) CountUp and ShinyText (via its shadcn registry) | Kept deliberately quiet. See *Design* below |
 
 ## Architecture
 
@@ -96,7 +115,7 @@ Everything that produces a number or an accounting decision that must be auditab
 ## How incorrect or unsupported financial answers are prevented
 
 1. **The LLM never produces totals.** Tools return pre-computed figures, including deltas and percentages. A `calculate` tool does exact arithmetic when the model needs a figure that isn't already provided.
-2. **Grounding check** (`lib/ai/grounding.ts`): every figure in an answer ($, %, and K/M abbreviations) must match a number that appeared in a tool output, allowing only for rounding. If any figure doesn't match, the model is told which ones and asked to rewrite. The UI shows *"N figures verified against ledger"* or lists the unverified figures in amber.
+2. **Grounding check** (`lib/ai/grounding.ts`): every figure in an answer ($, %, and K/M abbreviations) must match a number that appeared in a tool output, allowing only for rounding. If any figure doesn't match, the model is told which ones and asked to rewrite. The UI shows *"N figures checked against the ledger"* or lists the figures it couldn't match in amber.
 3. **Variance narratives fail closed.** If the AI text includes an unverified figure, the app shows the deterministic template instead.
 4. **Constrained categorization.** The AI's output is schema-validated with zod, and category IDs it invents are rejected.
 5. **Traceability.** Every answer shows the tool calls it made (arguments and raw results) and the transactions it cites. Each cited ID is clickable.
@@ -117,7 +136,16 @@ Transactions behind a figure are attached server-side as evidence and never sent
 
 ## How the output is verified
 
-- `npm test` runs 25 tests against the real dataset and the messy export:
+- `npm run eval` sends real questions to the live model and scores each answer on four checks:
+  - it contains the figures the engine computed;
+  - it cites the required transactions;
+  - every figure is grounded;
+  - on adversarial prompts (a month outside the data, after-tax profit the data can't support, an instruction to "just estimate"), it declines instead of inventing a number.
+
+  Latest run: **9/9 passed, 9/9 fully grounded, about 2s per answer** ([evals/RESULTS.md](evals/RESULTS.md)).
+
+  The eval has already caught a real bug. An early run showed the model claiming "net profit after tax and interest = operating profit" because no tax or interest appeared in the bank data, and a loose check let it pass. I added a rule to the analyst prompt, since bank data can't show accruals, tax or interest, so operating profit is never presented as net profit. I also added a `forbid` check so the regression can't pass silently again.
+- `npm test` runs 26 tests against the real dataset and the messy export:
   - ingestion and the bank total to the cent;
   - March P&L figures checked against an independent Python (openpyxl) calculation;
   - monthly reconciliation;
@@ -155,16 +183,40 @@ On **Feb→Mar operating profit (+$12,844.18)**:
 - **Classify by pattern rather than by transaction.** One LLM call covers the dataset (35 patterns instead of 181 lines). That's cheaper, gives consistent labels across recurring lines, and lets a correction apply to all similar transactions.
 - **Delivery commissions are OpEx, and payouts are gross revenue.** This is a presentation policy, and the app flags it for confirmation.
 - **Persistence is localStorage plus server-side recomputation.** That means zero infrastructure for the demo, with corrections stored as an append-only audit log. In production this log would live in Postgres with user identity, which is a straightforward swap because the engine is pure.
-- **Colour encodes provenance.** Violet always means AI-authored text, and plain text means computed figures. The split the brief asks for is visible on screen.
+- **Colour encodes provenance.** Blue pencil always means AI-authored text, and ink means computed figures. The split the brief asks for is visible on screen.
+
+## Design
+
+The interface is modelled on an accountant's **workpaper**, not a SaaS dashboard.
+- **Layout:** a white sheet on a grey desk. The statement is one continuous table running from revenue down to the tie-out to the bank, and the analyst sits in the margin.
+- **Tickmarks:** the same marks auditors pencil next to figures, with real meaning here:
+  - ✓ agreed to bank transactions;
+  - Σ footed;
+  - ⚑ an open review item touches this figure;
+  - ✎ adjusted by a reviewer.
+- **Colour** is used only for meaning:
+  - blue for anything the AI wrote;
+  - green and red for favourable and unfavourable figures;
+  - amber for items that need a decision.
+- **Type:** IBM Plex Sans Condensed for headings, like a printed ledger form, and Plex Sans with tabular figures for the numbers.
+- **Motion:** one moment only, where the landing excerpt is ticked off line by line. Figures never animate into a wrong value; the profit count-up snaps to the exact number when it finishes.
+- **Responsive:**
+  - under 768px, navigation moves to a bottom tab bar;
+  - the analyst opens as a full-screen sheet;
+  - the statement keeps its first column pinned while the months scroll sideways;
+  - the ledger becomes a tappable list;
+  - touch targets are at least 44px, and inputs use 16px text so iOS doesn't zoom.
 
 ## Project layout
 
 ```
-src/lib/finance/   chartOfAccounts, ingest, rules, ledger, pnl, variance, review, workspace (+ tests)
-src/lib/ai/        groq client, categorize, tools, analyst agent, narrate, grounding
-src/app/api/       ingest, chat, explain, status
+src/lib/finance/   chartOfAccounts, ingest, rules, ledger, pnl, variance, review, tickmarks, workspace (+ tests)
+src/lib/ai/        groq client, categorize, tools, analyst agent, briefing, narrate, grounding
+src/lib/export.ts  .xlsx workpaper export
+src/app/api/       ingest, chat, briefing, explain, status
 src/components/app Landing, Shell, Overview (P&L), Variances, ReviewQueue, Transactions, TxnDrawer, Analyst
-src/components/reactbits  vendored React Bits components
+evals/             live analyst evaluation + latest RESULTS.md
+.github/workflows  CI: lint, typecheck, tests, build
 ```
 
 ## Deploying

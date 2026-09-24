@@ -6,7 +6,6 @@ import ShinyText from "@/components/reactbits/ShinyText";
 import type { AnalystReply } from "@/lib/ai/analyst";
 import { dataKey, getBriefing } from "@/lib/client";
 import { useStore } from "@/lib/store";
-import { AiMark } from "./bits";
 import { Markdown, Trace } from "./Answer";
 
 export default function Briefing() {
@@ -47,29 +46,29 @@ export default function Briefing() {
   }, []);
 
   return (
-    <section aria-labelledby="brief-h" className="relative overflow-hidden rounded-2xl border border-iris/25 bg-gradient-to-br from-iris-deep/15 via-panel to-panel p-5 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 id="brief-h" className="flex items-center gap-3 font-display text-lg font-semibold">
-          Analyst briefing <AiMark label="Written by AI from computed figures" />
+    <section aria-labelledby="brief-h" className="border-l-2 border-ai pl-4 sm:pl-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 id="brief-h" className="font-cond text-lg font-semibold">
+          Analyst&apos;s summary <span className="ml-1 font-sans text-xs font-normal text-ai">written by AI from the figures below</span>
         </h2>
         {(reply || error) && (
-          <button onClick={run} disabled={loading} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-paper disabled:opacity-40">
-            <RefreshCw className="size-3.5" aria-hidden /> {key && key !== current ? "Numbers changed, so refresh" : "Regenerate"}
+          <button onClick={run} disabled={loading} className="inline-flex items-center gap-1.5 text-sm text-ink-2 hover:text-ink disabled:opacity-40">
+            <RefreshCw className="size-3.5" aria-hidden /> {key && key !== current ? "Figures changed, rewrite summary" : "Rewrite"}
           </button>
         )}
       </div>
-      <div className="mt-3 max-w-[80ch] text-muted">
+      <div className="mt-2 max-w-[78ch]">
         {loading ? (
-          <ShinyText text="Reading the P&L, variances and review queue…" color="#8b80d6" shineColor="#ede9e0" speed={2} className="text-sm" />
+          <ShinyText text="Reading the statement, changes and review list…" color="#6d86e6" shineColor="#1b2233" speed={2} className="text-sm" />
         ) : error ? (
-          <p className="text-sm text-amber">{error}</p>
+          <p className="text-sm text-flag">{error}</p>
         ) : reply ? (
           <>
             <Markdown text={reply.answer} />
             <Trace reply={reply} />
           </>
         ) : (
-          <button onClick={run} className="text-sm text-iris hover:underline">Generate briefing</button>
+          <button onClick={run} className="text-sm text-ai hover:underline">Write a summary</button>
         )}
       </div>
     </section>

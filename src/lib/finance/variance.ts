@@ -96,8 +96,21 @@ function categoryDrivers(ledger: Transaction[], a: MonthlyPnl, b: MonthlyPnl, se
     .sort((x, y) => Math.abs(y.effect) - Math.abs(x.effect));
 }
 
-/** Deterministic context facts that often explain a variance (calendar effects etc). */
-function contextFacts(ledger: Transaction[], from: string, to: string): string[] {
+const METRIC_SECTIONS: Record<string, Section[]> = {
+  revenue: ["revenue"], cogs: ["cogs"], payroll: ["payroll"], opex: ["opex"],
+  grossProfit: ["revenue", "cogs"], operatingProfit: ["revenue", "cogs", "payroll", "opex"],
+};
+
+/** Does a transaction feed this metric (a P&L total or a single category)? */
+function scopeOf(metric: string): (t: Transaction) => boolean {
+  const sections = METRIC_SECTIONS[metric];
+  return sections
+    ? (t) => sections.includes(categoryOf(t.classification.categoryId).section)
+    : (t) => t.classification.categoryId === metric;
+}
+
+/** Deterministic context facts relevant to this metric (calendar effects, one-offs). */
+function contextFacts(ledger: Transaction[], from: string, to: string, inScope: (t: Transaction) => boolean): string[] {
   const facts: string[] = [];
   const weeks = (m: string) =>
     new Set(
@@ -107,12 +120,13 @@ function contextFacts(ledger: Transaction[], from: string, to: string): string[]
         .filter(Boolean),
     ).size;
   const wf = weeks(from), wt = weeks(to);
-  if (wf && wt && wf !== wt) {
-    facts.push(`${monthLabel(to)} contains ${wt} weekly POS deposit batches vs ${wf} in ${monthLabel(from)} — part of the change is calendar timing, not trading performance.`);
+  const weeklyInScope = ledger.some((t) => (t.month === from || t.month === to) && inScope(t) && /\bweek\s*\d+/i.test(t.description));
+  if (wf && wt && wf !== wt && weeklyInScope) {
+    facts.push(`${monthLabel(to)} contains ${wt} weekly POS deposit batches vs ${wf} in ${monthLabel(from)}. Part of the change is calendar timing, not trading performance.`);
   }
   const patternCounts = new Map<string, number>();
   ledger.forEach((t) => patternCounts.set(t.pattern, (patternCounts.get(t.pattern) ?? 0) + 1));
-  const oneOffs = ledger.filter((t) => (t.month === to || t.month === from) && patternCounts.get(t.pattern) === 1);
+  const oneOffs = ledger.filter((t) => (t.month === to || t.month === from) && patternCounts.get(t.pattern) === 1 && inScope(t));
   oneOffs.forEach((t) => {
     const cat = categoryOf(t.classification.categoryId);
     facts.push(`One-off in ${monthLabel(t.month)}: ${t.id} "${t.description}" ${t.amount < 0 ? "-" : ""}$${Math.abs(t.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })} (${cat.name}${cat.section === "non_pnl" ? ", excluded from P&L" : ""}).`);
@@ -128,13 +142,8 @@ const weekOf = (t: Transaction) => Number(t.description.match(/\bweek\s*(\d+)/i)
  * underlying change. Each transaction's effect is its bank amount, flipped
  * for cost metrics, so the three parts sum exactly to the delta.
  */
-function decompose(ledger: Transaction[], metric: string, isTotal: boolean, from: string, to: string, delta: number): Variance["decomposition"] {
-  const sections: Record<string, Section[]> = {
-    revenue: ["revenue"], cogs: ["cogs"], payroll: ["payroll"], opex: ["opex"],
-    grossProfit: ["revenue", "cogs"], operatingProfit: ["revenue", "cogs", "payroll", "opex"],
-  };
-  const inScope = (t: Transaction) =>
-    isTotal ? sections[metric].includes(categoryOf(t.classification.categoryId).section) : t.classification.categoryId === metric;
+function decompose(ledger: Transaction[], metric: string, from: string, to: string, delta: number): Variance["decomposition"] {
+  const inScope = scopeOf(metric);
   const sign = isCostMetric(metric) ? -1 : 1;
   const effect = (t: Transaction) => sign * t.amount * (t.month === to ? 1 : -1);
 
@@ -215,8 +224,8 @@ export function computeVariance(ledger: Transaction[], pnls: MonthlyPnl[], metri
     impact: (cost ? delta <= 0 : delta >= 0) ? "favorable" : "unfavorable",
     material: isMaterial(level, delta, p, b.revenue.total),
     drivers,
-    context: contextFacts(ledger, fromMonth, toMonth),
-    decomposition: decompose(ledger, metric, isTotal, fromMonth, toMonth, delta),
+    context: contextFacts(ledger, fromMonth, toMonth, scopeOf(metric)),
+    decomposition: decompose(ledger, metric, fromMonth, toMonth, delta),
   };
 }
 

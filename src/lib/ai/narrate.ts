@@ -48,7 +48,7 @@ export async function narrateVariance(v: Variance): Promise<{ text: string; sour
       messages: [
         {
           role: "system",
-          content: "You are a restaurant controller explaining a P&L variance to the owner. Write 2-4 sentences. Use ONLY figures present in the JSON (copy them exactly, formatted like $12,345.67). Use the breakdown (calendar timing, one-offs, underlying change; they sum exactly to the change) to separate timing and one-offs from underlying performance; omit any part that is 0. Cite key transaction ids in square brackets like [T1179]. No preamble, no headings.",
+          content: "You are a restaurant controller explaining a P&L variance to the owner. Write 2-4 sentences. Use ONLY figures present in the JSON (copy them exactly, formatted like $12,345.67). Use the breakdown (calendar timing, one-offs, underlying change; they sum exactly to the change) to separate timing and one-offs from underlying performance; omit any part that is 0. When describing the underlying change, name its largest positive and its largest negative driver. Cite key transaction ids in square brackets like [T1179]. No preamble, no headings.",
         },
         { role: "user", content: JSON.stringify(payload) },
       ],

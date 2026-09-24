@@ -1,10 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { Check, FileSpreadsheet, Loader2, Upload } from "lucide-react";
-import Aurora from "@/components/reactbits/Aurora";
-import BlurText from "@/components/reactbits/BlurText";
-import StarBorder from "@/components/reactbits/StarBorder";
+import { Check, Loader2, Upload } from "lucide-react";
 import { buildWorkspace } from "@/lib/finance/workspace";
 import { materialVariances } from "@/lib/finance/variance";
 import { useStore } from "@/lib/store";
@@ -14,14 +11,67 @@ type StepState = "idle" | "running" | "done" | "warn";
 interface Step { label: string; detail: string; state: StepState }
 
 const INITIAL: Step[] = [
-  { label: "Ingest", detail: "Parse and validate the bank export", state: "idle" },
-  { label: "Categorize", detail: "Rules and the AI classify each line independently", state: "idle" },
-  { label: "Review", detail: "Flag items that need judgment", state: "idle" },
-  { label: "Calculate", detail: "Build monthly P&Ls and reconcile to the bank", state: "idle" },
-  { label: "Explain", detail: "Find material month-over-month variances", state: "idle" },
+  { label: "Ingest", detail: "Read the export and check every row", state: "idle" },
+  { label: "Categorize", detail: "Rules and AI label each line on their own, then compare", state: "idle" },
+  { label: "Review", detail: "Pull out items that need an accountant's judgment", state: "idle" },
+  { label: "Calculate", detail: "Build monthly P&Ls and tie them to the bank", state: "idle" },
+  { label: "Explain", detail: "Find the changes that matter and why they happened", state: "idle" },
 ];
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Real lines from the sample ledger, shown as they appear once reviewed. */
+const EXCERPT = [
+  { id: "T1119", date: "Mar 8", desc: "POS batch deposit, food sales", cat: "Food Sales", amt: "20,350.64", flag: false },
+  { id: "T1164", date: "Mar 15", desc: "Payroll, hourly kitchen and FOH", cat: "Hourly Wages", amt: "−19,455.95", flag: false },
+  { id: "T1179", date: "Mar 6", desc: "Large catering event food purchase", cat: "Food Cost", amt: "−6,200.00", flag: true },
+  { id: "T1062", date: "Jan 20", desc: "Sales tax remittance, Florida Dept. of Revenue", cat: "Sales Tax (off P&L)", amt: "−6,150.00", flag: true },
+];
+
+function TickSvg({ delay, flag }: { delay: number; flag?: boolean }) {
+  return flag ? (
+    <svg viewBox="0 0 16 16" className="size-4 text-flag" role="img" aria-label="Flagged for review">
+      <path d="M4 14V2.5h7.5l-1.6 2.7 1.6 2.8H4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"
+        strokeDasharray="24" className="animate-tick" style={{ animationDelay: `${delay}ms` }} />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 16 16" className="size-4 text-pos" role="img" aria-label="Agreed to bank">
+      <path d="M2.5 8.5l3.5 3.5 7.5-8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        strokeDasharray="24" className="animate-tick" style={{ animationDelay: `${delay}ms` }} />
+    </svg>
+  );
+}
+
+function Excerpt() {
+  return (
+    <figure>
+      <div className="overflow-hidden rounded-lg border border-rule-strong bg-sheet shadow-[0_1px_0_#c5cad3,0_12px_32px_-16px_rgba(27,34,51,0.25)]">
+        <div className="flex items-baseline justify-between gap-3 border-b border-rule px-4 py-2.5 text-xs text-ink-3">
+          <span>NYC Restaurant Co., Q1 2026</span>
+          <span>Reviewed ledger, extract</span>
+        </div>
+        <table className="w-full text-sm">
+          <tbody>
+            {EXCERPT.map((r, i) => (
+              <tr key={r.id} className={cx("border-b border-rule last:border-0", r.flag && "bg-flag-wash")}>
+                <td className="num whitespace-nowrap py-2.5 pl-4 pr-2 align-top text-xs text-ink-3">{r.date}</td>
+                <td className="py-2.5 pr-2 align-top">
+                  <span className="block leading-snug">{r.desc}</span>
+                  <span className="text-xs text-ink-3">{r.id}, {r.cat}</span>
+                </td>
+                <td className="num whitespace-nowrap py-2.5 pr-2 text-right align-top">{r.amt}</td>
+                <td className="w-8 py-2.5 pr-3 align-top"><TickSvg delay={500 + i * 280} flag={r.flag} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <figcaption className="mt-4 border-l-2 border-ai pl-3 text-sm leading-relaxed text-ai md:ml-auto md:max-w-80">
+        T1179 is a one-off. Take it out, along with March&apos;s fifth weekly deposit, and operating profit grew $6,019, not $12,844.
+      </figcaption>
+    </figure>
+  );
+}
 
 export default function Landing() {
   const loadWorkspace = useStore((s) => s.loadWorkspace);
@@ -38,35 +88,33 @@ export default function Landing() {
     setError(null);
     setSteps(INITIAL);
     try {
-      patch(0, { state: "running" });
-      await wait(250);
-      patch(0, { state: "done", detail: `Reading ${file.name}` });
+      patch(0, { state: "running", detail: `Reading ${file.name}` });
       patch(1, { state: "running" });
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch("/api/ingest", { method: "POST", body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Upload failed");
-      patch(0, { state: data.warnings.length ? "warn" : "done", detail: `${data.transactions.length} transactions from ${data.rowsRead} rows${data.warnings.length ? `, ${data.warnings.length} warnings` : ""}` });
+      if (!res.ok) throw new Error(data.error ?? "The file could not be read.");
+      patch(0, { state: data.warnings.length ? "warn" : "done", detail: `${data.transactions.length} transactions${data.warnings.length ? `, ${data.warnings.length} rows skipped` : ", no rows skipped"}` });
       const patterns = Object.keys(data.ai).length;
       patch(1, {
         state: data.aiStatus === "ok" ? "done" : "warn",
-        detail: data.aiStatus === "ok" ? `${patterns} distinct patterns classified by AI and cross-checked against rules` : data.aiStatus === "disabled" ? "AI unavailable, so rules only. Low-confidence items go to review." : `AI call failed, so rules only (${data.aiError?.slice(0, 60)})`,
+        detail: data.aiStatus === "ok" ? `${patterns} kinds of transaction labelled and cross-checked` : data.aiStatus === "disabled" ? "AI is off, so rules only. Anything unclear goes to review." : "AI didn't respond, so rules only. Anything unclear goes to review.",
       });
 
       const input = { raw: data.transactions, ai: data.ai, corrections: [], resolutions: [] };
       const ws = buildWorkspace(input);
       patch(2, { state: "running" });
-      await wait(300);
-      patch(2, { state: "done", detail: `${ws.review.length} items flagged for review` });
+      await wait(260);
+      patch(2, { state: "done", detail: `${ws.review.length} items need a decision` });
       patch(3, { state: "running" });
-      await wait(300);
+      await wait(260);
       const ok = ws.pnls.every((p) => p.reconciles);
-      patch(3, { state: ok ? "done" : "warn", detail: `${ws.pnls.length} monthly P&Ls, ${ok ? "all reconcile to the bank" : "reconciliation gap found"}` });
+      patch(3, { state: ok ? "done" : "warn", detail: ok ? `${ws.pnls.length} month${ws.pnls.length > 1 ? "s" : ""}, each tied to the bank to the cent` : "A month does not tie to the bank" });
       patch(4, { state: "running" });
-      await wait(300);
-      patch(4, { state: "done", detail: `${materialVariances(ws.variances).length} material variances found` });
-      await wait(700);
+      await wait(260);
+      patch(4, { state: "done", detail: `${materialVariances(ws.variances).length} material changes to explain` });
+      await wait(650);
       loadWorkspace(input, { fileName: file.name, ingestedAt: new Date().toISOString(), warnings: data.warnings, aiStatus: data.aiStatus, aiError: data.aiError });
     } catch (e) {
       setError((e as Error).message);
@@ -79,93 +127,97 @@ export default function Landing() {
     const res = await fetch(path);
     run(new File([await res.blob()], name));
   };
-  const useSample = () => loadSample("/sample/nyc-restaurant-transactions.xlsx", "NYC Restaurant Co. - Raw Transactions.xlsx");
 
   return (
-    <main className="relative min-h-dvh overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 opacity-60">
-        <Aurora colorStops={["#3b2f9e", "#a596ff", "#2a8f7a"]} amplitude={0.9} blend={0.6} speed={0.6} />
-      </div>
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-ink/70 to-ink" />
+    <main
+      className="min-h-dvh"
+      onDragOver={(e) => { e.preventDefault(); if (!busy) setDrag(true); }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target) setDrag(false); }}
+      onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f && !busy) run(f); }}
+    >
+      {drag && (
+        <div className="pointer-events-none fixed inset-3 z-50 grid place-items-center rounded-xl border-2 border-dashed border-ai bg-ai-wash/90 text-lg font-medium text-ai">
+          Drop the bank export to start the review
+        </div>
+      )}
 
-      <div className="relative mx-auto grid max-w-6xl gap-14 px-5 pb-16 pt-10 md:grid-cols-[1.15fr_1fr] md:pt-24">
-        <section>
-          <p className="font-display text-lg font-semibold text-paper">Finz Review</p>
-          <BlurText
-            text="Hand over the bank export. Get the monthly review back."
-            className="mt-10 font-display text-[clamp(2.4rem,5.5vw,4.25rem)] font-semibold leading-[1.02] tracking-tight text-paper"
-            delay={90}
-            animateBy="words"
-          />
-          <p className="mt-6 max-w-[52ch] text-lg leading-relaxed text-muted">
-            Every transaction is categorized, every total is computed from the ledger, and every answer the analyst
-            gives links back to the transactions behind it.
+      <header className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
+        <p className="font-cond text-lg font-semibold tracking-tight">Finz Review</p>
+        <a href="https://github.com/kushagragarg15/finz" className="text-sm text-ink-2 underline decoration-rule-strong underline-offset-4 hover:text-ink">Source on GitHub</a>
+      </header>
+
+      <section className="mx-auto grid max-w-6xl gap-12 px-4 pb-16 pt-6 sm:px-6 md:grid-cols-[1.05fr_1fr] md:gap-16 md:pt-14">
+        <div>
+          <h1 className="max-w-[16ch] font-cond text-[clamp(2.4rem,6vw,4.1rem)] font-semibold leading-[0.98] tracking-[-0.02em]">
+            Close the month with every number tied to the bank.
+          </h1>
+          <p className="mt-6 max-w-[54ch] text-lg leading-relaxed text-ink-2">
+            Upload a bank export. You get a categorized ledger, monthly P&Ls, the changes that matter and why, and a short
+            list of items that need your judgment. Ask questions in plain English and every answer points to its transactions.
           </p>
-          <dl className="mt-10 grid max-w-md grid-cols-2 gap-x-6 gap-y-4 text-sm">
-            <div><dt className="text-faint">Numbers</dt><dd className="text-paper">Deterministic, reconciled to bank</dd></div>
-            <div><dt className="text-faint">Judgment</dt><dd className="text-iris">AI, always with evidence</dd></div>
-          </dl>
-        </section>
 
-        <section aria-label="Upload" className="md:pt-16">
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-            onDragLeave={() => setDrag(false)}
-            onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f && !busy) run(f); }}
-            className={cx(
-              "rounded-2xl border bg-panel/80 p-6 backdrop-blur-md transition-colors",
-              drag ? "border-iris" : "border-line",
-            )}
-          >
-            {!busy ? (
-              <>
-                <button
-                  onClick={() => inputRef.current?.click()}
-                  className="flex w-full flex-col items-center gap-3 rounded-xl border border-dashed border-line px-4 py-10 text-center hover:border-iris/60"
-                >
-                  <Upload className="size-6 text-muted" aria-hidden />
-                  <span className="font-medium">Drop a bank export or choose a file</span>
-                  <span className="text-sm text-faint">.xlsx, .xls or .csv with date, description and amount columns</span>
-                </button>
-                <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => e.target.files?.[0] && run(e.target.files[0])} />
-                <div className="my-5 flex items-center gap-3 text-xs text-faint"><span className="h-px flex-1 bg-line" />or<span className="h-px flex-1 bg-line" /></div>
-                <StarBorder as="button" onClick={useSample} className="w-full" color="#a596ff" backgroundColor="#1d2742" borderColor="#28334f" textColor="#ede9e0" speed="5s">
-                  <span className="flex items-center justify-center gap-2 text-[15px]">
-                    <FileSpreadsheet className="size-4" aria-hidden /> Review the NYC Restaurant Co. sample
-                  </span>
-                </StarBorder>
-                <p className="mt-4 text-center text-sm text-faint">
-                  Want to see how it handles ambiguity?{" "}
-                  <button onClick={() => loadSample("/sample/messy-bank-export.csv", "messy-bank-export.csv")} className="text-muted underline decoration-line underline-offset-4 hover:text-paper">
-                    Try a messy bank export
-                  </button>
-                </p>
-                {error && <p role="alert" className="mt-4 text-sm text-tomato">{error}</p>}
-              </>
-            ) : (
-              <ol className="space-y-4" aria-live="polite">
-                {steps.map((s, i) => (
-                  <li key={s.label} className="flex gap-4">
-                    <span className={cx(
-                      "mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border text-xs",
-                      s.state === "done" && "border-teal/60 text-teal",
-                      s.state === "warn" && "border-amber/60 text-amber",
-                      s.state === "running" && "border-iris text-iris",
-                      s.state === "idle" && "border-line text-faint",
-                    )}>
-                      {s.state === "running" ? <Loader2 className="size-3.5 animate-spin" /> : s.state === "done" || s.state === "warn" ? <Check className="size-3.5" /> : i + 1}
-                    </span>
-                    <div>
-                      <p className={cx("font-medium", s.state === "idle" ? "text-faint" : "text-paper")}>{s.label}</p>
-                      <p className={cx("text-sm", s.state === "warn" ? "text-amber" : "text-muted")}>{s.detail}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
+          <div className="mt-9 flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => loadSample("/sample/nyc-restaurant-transactions.xlsx", "NYC Restaurant Co. - Raw Transactions.xlsx")}
+              disabled={busy}
+              className="h-12 rounded-md bg-ink px-5 font-medium text-white hover:bg-[#2a3350] disabled:opacity-50"
+            >
+              Review the sample books
+            </button>
+            <button
+              onClick={() => inputRef.current?.click()}
+              disabled={busy}
+              className="inline-flex h-12 items-center gap-2 rounded-md border border-rule-strong bg-sheet px-5 font-medium hover:border-ink-3 disabled:opacity-50"
+            >
+              <Upload className="size-4" aria-hidden /> Upload a bank export
+            </button>
+            <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => e.target.files?.[0] && run(e.target.files[0])} />
           </div>
-        </section>
-      </div>
+          <p className="mt-4 text-sm text-ink-3">
+            .xlsx or .csv with date, description and amount columns.{" "}
+            <button
+              onClick={() => loadSample("/sample/messy-bank-export.csv", "messy-bank-export.csv")}
+              disabled={busy}
+              className="text-ink-2 underline decoration-rule-strong underline-offset-4 hover:text-ink"
+            >
+              Try a messy export
+            </button>{" "}
+            to see how it handles ambiguity.
+          </p>
+          {error && <p role="alert" className="mt-4 max-w-[54ch] rounded-md border border-neg/30 bg-[#fdf0ee] px-3 py-2 text-sm text-neg">{error}</p>}
+        </div>
+
+        <div className="md:pt-4">
+          <Excerpt />
+        </div>
+      </section>
+
+      <section aria-labelledby="how-h" className="border-t border-rule bg-sheet">
+        <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 md:py-14">
+          <h2 id="how-h" className="font-cond text-xl font-semibold">{busy ? "Reviewing your books" : "What happens to your file"}</h2>
+          <ol className="mt-6 grid gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-5" aria-live="polite">
+            {steps.map((s, i) => (
+              <li key={s.label} className="flex gap-3 lg:block">
+                <span
+                  className={cx(
+                    "grid size-7 shrink-0 place-items-center rounded-full border text-xs font-medium",
+                    s.state === "done" && "border-pos bg-pos text-white",
+                    s.state === "warn" && "border-flag bg-flag text-white",
+                    s.state === "running" && "border-ai text-ai",
+                    s.state === "idle" && "border-rule-strong text-ink-2",
+                  )}
+                >
+                  {s.state === "running" ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : s.state === "done" || s.state === "warn" ? <Check className="size-3.5" aria-hidden /> : i + 1}
+                </span>
+                <div className="lg:mt-3">
+                  <p className="font-medium">{s.label}</p>
+                  <p className={cx("mt-0.5 text-sm leading-snug", s.state === "warn" ? "text-flag" : "text-ink-2")}>{s.detail}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
     </main>
   );
 }
