@@ -14,10 +14,16 @@ Built for the Finz SWE internship challenge using the *NYC Restaurant Co.* datas
 npm install
 cp .env.example .env.local        # add GROQ_API_KEY (free at console.groq.com)
 npm run dev                       # http://localhost:3000
-npm test                          # 20 engine + grounding tests
+npm test                          # 25 engine + grounding tests
 ```
 
-Click **Review the NYC Restaurant Co. sample** or drop in any `.xlsx`/`.csv` with date, description and amount columns.
+Click **Review the NYC Restaurant Co. sample**, or drop in any `.xlsx`/`.csv` with date, description and amount columns.
+
+**Try a messy bank export** loads `public/sample/messy-bank-export.csv`. It exercises the rest of the pipeline:
+- different column headers, US dates and `$(1,234.56)` amounts;
+- a duplicate charge;
+- a supplier credit;
+- ambiguous lines (Zelle payments, card autopay, IRS EFTPS, Venmo) where rules and AI disagree or are unsure, which puts them in review.
 
 Without a `GROQ_API_KEY` the app still works in **rules-only mode**: categorization, P&L, variances and the review queue all run. The analyst and the AI explanations are turned off, and variance explanations fall back to deterministic templates.
 
@@ -59,7 +65,7 @@ The client never sends computed numbers to the server. It sends the raw transact
 | **Categorization** (`lib/ai/categorize.ts`) | Classifies each *distinct pattern* (weekly lines collapse into one) into the chart of accounts, with a confidence and a rationale, **independently of the rules** | Handles unfamiliar vendors and descriptions, and reasons about accounting treatment (an "equipment purchase" is capex, not an expense) |
 | **Analyst** (`lib/ai/analyst.ts`) | Plans which tools to call, interprets the results, writes the answer and cites transaction IDs | Understanding the question and building the narrative is where language models add value |
 | **Variance narratives** (`lib/ai/narrate.ts`) | Turns a deterministic driver breakdown into 2–4 sentences, separating timing effects and one-offs from underlying performance | Explanation, not calculation |
-| **Briefing** | An executive summary produced by the same grounded analyst pipeline | |
+| **Briefing** (`lib/ai/briefing.ts`) | Writes a 5-bullet executive summary over facts the server assembles deterministically. It's one call with no tools, and it gets the same grounding check | |
 
 ## Where deterministic logic is used, and why
 
@@ -73,7 +79,13 @@ Everything that produces a number or an accounting decision that must be auditab
   - neither: the line goes to suspense.
 - **P&L** (`pnl.ts`): Revenue, COGS, Gross Profit, Payroll, OpEx and Operating Profit are sums over the classified ledger. Non-P&L items (capex, loan principal, owner distributions, sales tax, gift cards) are kept below the line.
 - **Reconciliation:** each month asserts `operating profit + non-P&L cash = net bank movement`, to the cent.
-- **Variances** (`variance.ts`): deltas, % changes, a materiality policy, and a driver decomposition from category down to recurring pattern down to transaction. Also deterministic **context facts**, e.g. *"March contains 5 weekly POS deposit batches vs 4 in February"* and one-off transactions.
+- **Variances** (`variance.ts`): deltas, % changes, a materiality policy, and a driver decomposition from category down to recurring pattern down to transaction.
+- **Variance decomposition:** every variance is split exactly into
+  - **calendar timing**: extra weekly batches in one month, e.g. March has 5 weekly POS deposits and February has 4;
+  - **one-offs**: patterns seen once in the dataset;
+  - **underlying change**, with its own category drivers.
+
+  The model quotes these parts instead of adding numbers up itself.
 - **Review rules** (`review.ts`): non-P&L treatment, low confidence or rule/AI disagreement, out-of-state tax counterparty, amounts ≥1.5× the pattern median, material one-offs, annual costs expensed in one month, possible duplicates, and gross-vs-net delivery presentation.
 
 **Materiality policy:**
@@ -90,9 +102,22 @@ Everything that produces a number or an accounting decision that must be auditab
 5. **Traceability.** Every answer shows the tool calls it made (arguments and raw results) and the transactions it cites. Each cited ID is clickable.
 6. **The system prompt** requires tool use before answering, citations, and a plain "the data can't answer that" when it can't.
 
+### Working within free-tier limits
+Groq's free tier allows 8,000 tokens per minute *per model*. The client (`lib/ai/groq.ts`) handles a rate limit in two steps:
+1. It falls through a model chain: `openai/gpt-oss-120b`, then `openai/gpt-oss-20b`, then `qwen/qwen3.8-27b`.
+2. If every model is limited, it waits for the reported retry delay.
+
+Tool payloads are kept compact:
+- P&L lines only when requested;
+- transaction rows as arrays;
+- results capped at 5k characters;
+- identical tool calls deduplicated.
+
+Transactions behind a figure are attached server-side as evidence and never sent to the model. A typical question costs about 3k tokens and takes about 2s.
+
 ## How the output is verified
 
-- `npm test` runs 20 tests against the real dataset:
+- `npm test` runs 25 tests against the real dataset and the messy export:
   - ingestion and the bank total to the cent;
   - March P&L figures checked against an independent Python (openpyxl) calculation;
   - monthly reconciliation;
@@ -101,7 +126,9 @@ Everything that produces a number or an accounting decision that must be auditab
   - corrections flowing through to the P&L;
   - the ensemble merge logic;
   - calculator sandboxing;
-  - grounding pass and fail cases.
+  - grounding pass and fail cases;
+  - decomposition parts summing exactly to every variance;
+  - messy-CSV parsing, duplicate detection and supplier credits.
 - The reconciliation badge is visible in the UI, and each month's check can be drilled into.
 - Every P&L cell is clickable down to its transactions.
 
@@ -117,7 +144,10 @@ Everything that produces a number or an accounting decision that must be auditab
 - **T1181** annual licence: a prepaid candidate.
 - Delivery payouts are booked gross with separate commissions (~25%). Confirm they aren't already net, or the fees are double-counted.
 
-On **Feb→Mar operating profit (+$12,844)**, revenue is up $24,918, but March has 5 weekly deposit batches against February's 4. That calendar effect is surfaced separately from the underlying growth, and it's offset by the $6,200 one-off food purchase and higher hourly payroll.
+On **Feb→Mar operating profit (+$12,844.18)**:
+- **+$13,924.92** is calendar timing: March has a 5th weekly deposit batch.
+- **−$7,100.00** is one-offs: the catering food purchase T1179 and the annual licence T1181.
+- **+$6,019.26** is the underlying change. Food, beverage and delivery sales grew, and they were partly absorbed by **hourly wages up $5,354.81**, which has no timing or one-off explanation. That's the real cost pressure to watch.
 
 ## Key decisions and trade-offs
 
